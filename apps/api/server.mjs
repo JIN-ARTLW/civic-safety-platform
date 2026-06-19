@@ -133,6 +133,8 @@ async function postReport(req, res) {
     tenant_id: tenant ? tenant.id : null,
     photo_url: storedPath,
     detected_objects: Array.isArray(b.objects) ? b.objects : [],
+    ai_summary: b.ai_summary || null,
+    ai_source: b.ai_source || null,
     pii_removed: anon.piiRemoved,
     location: point,
     captured_at: b.captured_at || null,
@@ -239,6 +241,7 @@ const server = http.createServer(async (req, res) => {
         return { id: r.id, tracking_no: r.tracking_no, category: cat ? cat.name : null,
           department: cat ? cat.department : null, priority: r.priority, status: r.status,
           location: r.location, photo_url: r.photo_url, detected_objects: r.detected_objects || [],
+          ai_summary: r.ai_summary || null, ai_source: r.ai_source || null,
           cluster: cl ? { id: cl.id, report_count: cl.report_count } : null,
           submitted_at: r.submitted_at, confidence: r.classification_confidence };
       });

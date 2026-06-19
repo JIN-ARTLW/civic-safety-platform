@@ -21,10 +21,10 @@ export function canTransition(from, to) {
 // p3.sumzip.com 파일럿: 단일 지자체. 경계 밖 좌표는 관할 외.
 export const TENANTS = [
   {
-    id: 'tnt-seoul-jung',
-    name: '서울 중구청 (파일럿)',
-    // 대략적인 서울 중심부 bbox [minLng, minLat, maxLng, maxLat]
-    bbox: [126.95, 37.53, 127.02, 37.58],
+    id: 'tnt-cheongju',
+    name: '충북 청주시 (파일럿)',
+    // 대략적인 청주시 관할 bbox [minLng, minLat, maxLng, maxLat] (중심 ≈ 36.6424, 127.489)
+    bbox: [127.38, 36.55, 127.62, 36.73],
     settings: { rewardPointsPerValidReport: 100 },
   },
 ];

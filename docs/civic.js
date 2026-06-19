@@ -15,8 +15,8 @@
     return REPORT_STATUS.indexOf(to) >= 0 && (TRANSITIONS[from] || []).indexOf(to) >= 0;
   }
   var TENANTS = [{
-    id: 'tnt-seoul-jung', name: '서울 중구청 (파일럿)',
-    bbox: [126.95, 37.53, 127.02, 37.58],
+    id: 'tnt-cheongju', name: '충북 청주시 (파일럿)',
+    bbox: [127.38, 36.55, 127.62, 36.73],
     settings: { rewardPointsPerValidReport: 100 },
   }];
   var HAZARD_CATEGORIES = [
@@ -125,7 +125,7 @@
         id: uid('rep'), tracking_no: 'CSR-2026-' + String(d.seq).padStart(5, '0'),
         tenant_id: tenant ? tenant.id : null,
         photo_url: input.photo || anon.anonymizedName,   // 실제 업로드 이미지(dataURL) 저장
-        detected_objects: input.objects || [], pii_removed: true,
+        detected_objects: input.objects || [], ai_summary: input.ai_summary || null, ai_source: input.ai_source || null, pii_removed: true,
         location: point, submitted_at: new Date().toISOString(), category_code: cls.category_code,
         classification_confidence: cls.confidence, status: 'received', priority: cat ? cat.priority : 3,
         cluster_id: clustered, submitter_account_id: input.account_id || null, submitter_device_hash: input.device_token || null, purge_after: null,
@@ -156,7 +156,7 @@
       return rows.map(function (r) {
         var cat = r.category_code ? categoryByCode(r.category_code) : null;
         var cl = r.cluster_id ? d.clusters.filter(function (x) { return x.id === r.cluster_id; })[0] : null;
-        return { id: r.id, tracking_no: r.tracking_no, category: cat ? cat.name : null, department: cat ? cat.department : null, priority: r.priority, status: r.status, location: r.location, photo_url: r.photo_url, detected_objects: r.detected_objects || [], cluster: cl ? { id: cl.id, report_count: cl.report_count } : null, submitted_at: r.submitted_at, confidence: r.classification_confidence };
+        return { id: r.id, tracking_no: r.tracking_no, category: cat ? cat.name : null, department: cat ? cat.department : null, priority: r.priority, status: r.status, location: r.location, photo_url: r.photo_url, detected_objects: r.detected_objects || [], ai_summary: r.ai_summary || null, ai_source: r.ai_source || null, cluster: cl ? { id: cl.id, report_count: cl.report_count } : null, submitted_at: r.submitted_at, confidence: r.classification_confidence };
       });
     },
 
