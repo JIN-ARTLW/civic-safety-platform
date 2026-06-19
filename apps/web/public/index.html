@@ -93,8 +93,7 @@
         if (!CivicVision.available()) { ai.textContent='⚠️ AI 모델 로드 실패(오프라인?) — 유형을 직접 선택해 제출하세요.'; enable(); return; }
         ai.textContent = '🧠 AI 분석 중… (최초 1회 모델 다운로드)';
         try {
-          var preds = await CivicVision.detect(img);
-          aiResult = CivicVision.classify(preds);
+          aiResult = await CivicVision.analyze(img);
           var objs = aiResult.objects.length ? aiResult.objects.map(function(o){return o.label+'('+(o.score*100).toFixed(0)+'%)';}).join(', ') : '뚜렷한 객체 없음';
           var catName = aiResult.category_code ? document.querySelector('#category option[value="'+aiResult.category_code+'"]').textContent : '미정(직접 선택 필요)';
           ai.innerHTML = '🧠 <b>탐지</b>: '+objs+'<br>📌 <b>추천 유형</b>: '+catName+' · 신뢰도 '+(aiResult.confidence*100).toFixed(0)+'%'+(aiResult.persons?(' · 사람 '+aiResult.persons+'명 감지(비식별 대상)') : '');
