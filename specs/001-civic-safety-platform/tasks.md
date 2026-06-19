@@ -20,7 +20,8 @@ description: "Task list for 시민 참여형 스마트시티 안전 플랫폼"
 > |---|---|---|
 > | 도메인(엔티티·상태전이·테넌트·라우팅·중복) | `apps/api/domain.mjs` | ✅ 실동작 |
 > | 백엔드 API(신고/관제/공문서/안내) | `apps/api/server.mjs`, `store.mjs` | ✅ 실동작 |
-> | AI 파이프라인(비식별/분류/RAG/공문서) | `apps/api/ai.mjs` | ⚠️ 동작 스텁(휴리스틱) — 실모델 미탑재 |
+> | 이미지 업로드 + 위험 분류 | `vision.js`(브라우저) + `apps/api/server.mjs` 저장 | ✅ 실동작 — 실제 사진 업로드 + TensorFlow.js COCO-SSD 객체탐지(클라이언트) |
+> | AI 파이프라인(비식별/RAG/공문서) | `apps/api/ai.mjs` | ⚠️ 동작 스텁 — 얼굴/번호판 블러·RAG·LLM 미탑재 |
 > | 프론트(시민/관제 + 테마) | `apps/web/public/index.html`, `officer.html`, `styles.css` | ✅ 실동작 |
 > | 데이터 저장 | `apps/api/data/db.json` (파일) | ⚠️ Supabase/RLS 대체(코드 레벨 테넌트 격리) |
 > | 도메인 접근(p3.sumzip.com) | `deploy/Caddyfile`, `deploy/nginx.conf` | ✅ 프록시 설정 제공 |
