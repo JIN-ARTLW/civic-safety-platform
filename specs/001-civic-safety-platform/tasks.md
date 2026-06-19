@@ -10,23 +10,30 @@ description: "Task list for 시민 참여형 스마트시티 안전 플랫폼"
 
 **Tests**: 본 명세는 TDD를 명시 요청하지 않았으므로 단위/통합 테스트 태스크는 최소화하고, 계약(contract) 검증과 quickstart E2E 검증을 핵심 게이트로 둔다.
 
-## Implementation Status — MVP (2026-06-19, `/speckit-implement`)
+## Implementation Status — MVP (최종 갱신 2026-06-19)
 
-> **실행 가능한 MVP가 구현·검증되었습니다.** Front-end `:9503`, Back-end `:9523`, 도메인 `p3.sumzip.com`(리버스 프록시 `deploy/`)으로 접근 가능.
+> **공개 배포된 실행 MVP가 구현·검증되었습니다.**
+> - 🌐 **터널(풀스택, 공유 백엔드)**: cloudflared quick tunnel → `apps/gateway`(:9500) → 백엔드(:9523) + 프론트. 켜기/끄기: `./tunnel.sh on|off|status`
+> - 🌐 **GitHub Pages(정적, 영구)**: https://jin-artlw.github.io/civic-safety-platform/ (브라우저 localStorage 저장)
+> - 파일럿 관할: **충북 청주시**(테넌트 `tnt-cheongju`)
 >
-> **런타임 주의(정직 고지)**: 이 환경에서 풀스택(Supabase/PostGIS/pgvector + 실제 VLM/YOLO 모델 + Next.js + Python)을 검증 가능하게 구동하기 어려워, **의존성 없는 Node 내장 모듈 기반 MVP**로 동일한 도메인 로직·API 계약·UX를 구현했습니다. 따라서 `[x]`는 **"기능적 의도가 실행 MVP에서 구현·검증됨"** 을 의미하며, 실제 파일 경로는 plan.md가 지정한 경로(`apps/api/src/...`, `supabase/migrations/...`)가 아니라 MVP 경로(`apps/api/*.mjs`, `apps/web/*`)에 있습니다.
+> **런타임 주의(정직 고지)**: 풀스택(Supabase/PostGIS/pgvector + Next.js + Python)을 이 환경에서 검증 가능하게 구동하기 어려워, **의존성 없는 Node 내장 모듈 + 브라우저 ML** 로 동일 도메인 로직·API 계약·UX를 구현했습니다. `[x]`=기능 의도가 실행 MVP에서 구현·검증됨.
 >
-> | 계획 컴포넌트 | MVP 구현 위치 | 상태 |
+> | 영역 | 구현 | 상태 |
 > |---|---|---|
-> | 도메인(엔티티·상태전이·테넌트·라우팅·중복) | `apps/api/domain.mjs` | ✅ 실동작 |
-> | 백엔드 API(신고/관제/공문서/안내) | `apps/api/server.mjs`, `store.mjs` | ✅ 실동작 |
-> | 이미지 업로드 + 위험 분류 | `vision.js`(브라우저 CLIP 제로샷) + `apps/api/vision_claude.mjs`(서버, 키 있을 때) | ✅ 실동작 — 사진 업로드 후 CLIP(Transformers.js)으로 5개 위험유형 의미 분류(키 불필요). 키 설정 시 Claude 비전으로 자동 승급 |
-> | AI 파이프라인(비식별/RAG/공문서) | `apps/api/ai.mjs` | ⚠️ 동작 스텁 — 얼굴/번호판 블러·RAG·LLM 미탑재 |
-> | 프론트(시민/관제 + 테마) | `apps/web/public/index.html`, `officer.html`, `styles.css` | ✅ 실동작 |
-> | 데이터 저장 | `apps/api/data/db.json` (파일) | ⚠️ Supabase/RLS 대체(코드 레벨 테넌트 격리) |
-> | 도메인 접근(p3.sumzip.com) | `deploy/Caddyfile`, `deploy/nginx.conf` | ✅ 프록시 설정 제공 |
+> | 도메인(엔티티·상태전이·테넌트·관할 라우팅·중복묶음) | `apps/api/domain.mjs` | ✅ 실동작 |
+> | 백엔드 API(신고/관제/공문서/안내/이미지) | `apps/api/server.mjs`·`store.mjs` | ✅ 실동작 |
+> | **분류 체계(안전신문고 3대 분야·14 세부유형)** | `domain.mjs`·`vision.js` | ✅ 실동작 |
+> | **이미지 업로드 + 위험 분류** | `vision.js`(브라우저 CLIP 제로샷, Transformers.js) | ✅ 실동작 — 키 불필요. 노면손상 휴리스틱 폴백 |
+> | Claude 비전 승급(키 설정 시) | `apps/api/vision_claude.mjs` | ✅ 코드 완비(키 주입 시 자동 사용) |
+> | **섹션별 신고 양식 + AI 자동작성**(제목·내용·유형·일시) | `apps/web/public/report-form.js` | ✅ 실동작 (개인정보 항목 제외) |
+> | **위치**(사진 EXIF GPS → 현재위치 → 다음 우편번호 주소검색+지오코딩) | `index.html` + exifr/Nominatim | ✅ 실동작 |
+> | 관제 대시보드(분야·유형·제목·차량번호·일시·AI요약·사진 썸네일) | `officer.html` | ✅ 실동작 |
+> | AI 비식별/RAG/LLM공문서 | `apps/api/ai.mjs` | ⚠️ 동작 스텁(실 블러·RAG·LLM 미탑재) |
+> | 데이터 저장 | `data/db.json` / localStorage | ⚠️ Supabase/RLS 대체 |
+> | 외부 공개 | `tunnel.sh`·`deploy/` | ✅ 터널 + Pages |
 >
-> **`[x]` = 기능 구현·검증 완료(스텁 포함), `[ ]` = 실서비스 전환 시 잔여(실제 마이그레이션·실모델·Next.js·CI/부하/보안).** 검증: quickstart 시나리오 1~8 통과(curl E2E).
+> **잔여(실서비스 전환):** 실제 Supabase/PostGIS/pgvector·RLS, Next.js 이관, 얼굴/번호판 실블러, RAG/LLM, 알림 발송, 보관·파기 배치, 테넌트 설정관리, CI/부하/보안, 고정 도메인.
 
 ## Format: `[ID] [P?] [Story] [Layer] Description`
 
@@ -72,8 +79,8 @@ description: "Task list for 시민 참여형 스마트시티 안전 플랫폼"
 - [ ] T011 [P] [DOM] 공유 도메인 타입/스키마(OpenAPI→TS 타입 생성) in `packages/shared/src/types.ts` (from contracts/openapi.yaml)
 - [ ] T012 [P] [BE] Supabase 클라이언트·인증 헬퍼(익명 device token + Supabase Auth) in `apps/api/src/lib/supabase.ts`, `auth.ts` (FR-024, R7)
 - [x] T013 [BE] API 라우팅·미들웨어 골격(테넌트 컨텍스트 주입, 에러 처리, 구조적 로깅) in `apps/api/src/routes/_app.ts`, `apps/api/src/lib/logger.ts`
-- [ ] T014 [P] [FE] 시민 웹 앱 셸 + Intercom 테마 토큰 적용 in `apps/citizen-web/src/app/layout.tsx`
-- [ ] T015 [P] [FE] 관제 대시보드 앱 셸 + IBM Carbon 테마 토큰 적용 in `apps/admin-dashboard/src/app/layout.tsx`
+- [x] T014 [P] [FE] 시민 웹 앱 셸 + Intercom 테마 토큰 적용 in `apps/citizen-web/src/app/layout.tsx`
+- [x] T015 [P] [FE] 관제 대시보드 앱 셸 + IBM Carbon 테마 토큰 적용 in `apps/admin-dashboard/src/app/layout.tsx`
 - [x] T016 [P] [BE] AI 추론 서비스 골격(큐 기반 비동기, 헬스체크) in `services/ai-inference/src/main.py` (R10)
 - [ ] T017 [DOM] 위험유형·부서매핑·파일럿 테넌트 시드 in `supabase/seed/seed.sql`
 
