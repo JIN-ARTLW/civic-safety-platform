@@ -83,7 +83,7 @@
         tr.innerHTML = `
           <td>${img}</td>
           <td>${r.tracking_no}</td>
-          <td>${r.category||'미분류'}${objs?`<br><span class="muted" style="font-size:11px">🧠 ${objs}</span>`:''}${aiLine}</td>
+          <td>${r.section?`<b>${r.section}</b> · `:''}${r.category||'미분류'}${r.title?`<br><span class="muted" style="font-size:12px">📝 ${r.title}</span>`:''}${r.vehicle_no?`<br><span class="muted" style="font-size:11px">🚗 ${r.vehicle_no}</span>`:''}${objs?`<br><span class="muted" style="font-size:11px">🧠 ${objs}</span>`:''}${aiLine}</td>
           <td>${r.department||'-'}</td>
           <td>P${r.priority}</td>
           <td>${r.cluster && r.cluster.report_count>1 ? '×'+r.cluster.report_count : '-'}</td>

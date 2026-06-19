@@ -29,17 +29,31 @@ export const TENANTS = [
   },
 ];
 
-// 테넌트별 위험 유형 분류 체계 + 담당 부서 매핑 (HazardCategory)
-export const HAZARD_CATEGORIES = [
-  { code: 'ROAD_DAMAGE', name: '도로 파손(포트홀 등)', department: '도로과', priority: 1 },
-  { code: 'FACILITY_DAMAGE', name: '시설물 훼손', department: '시설관리과', priority: 2 },
-  { code: 'FLOOD_RISK', name: '침수/치수 위험', department: '치수과', priority: 1 },
-  { code: 'SAFETY_THREAT', name: '안전 위협(표지판/낙하물 등)', department: '안전총괄과', priority: 1 },
-  { code: 'ETC', name: '기타', department: '민원실', priority: 3 },
-];
+// 안전신문고 3대 분류
+export const SECTIONS = {
+  TRAFFIC: '자동차·교통 위반', LIVING: '생활불편', SAFETY: '안전',
+};
 
-export function categoryByCode(code) {
-  return HAZARD_CATEGORIES.find((c) => c.code === code) || null;
+// 세부유형 → {분야, 표시명, 담당부서, 우선순위}
+export const SUBCATEGORIES = {
+  T_PARKING:   { section: 'TRAFFIC', name: '불법 주·정차',            department: '교통지도과',   priority: 2 },
+  T_VIOLATION: { section: 'TRAFFIC', name: '교통법규 위반(신호·과속 등)', department: '경찰서(연계)', priority: 1 },
+  T_PLATE:     { section: 'TRAFFIC', name: '번호판 규정 위반',         department: '차량등록과',   priority: 3 },
+  T_TUNING:    { section: 'TRAFFIC', name: '불법 튜닝·등화·반사판',    department: '차량등록과',   priority: 3 },
+  L_TRASH:     { section: 'LIVING',  name: '쓰레기·폐기물 무단투기',   department: '청소행정과',   priority: 2 },
+  L_AD:        { section: 'LIVING',  name: '불법 광고물',             department: '도시미관과',   priority: 3 },
+  L_BIKE:      { section: 'LIVING',  name: '자전거·이륜차 방치',       department: '교통행정과',   priority: 3 },
+  L_ETC:       { section: 'LIVING',  name: '기타 생활불편',           department: '민원실',       priority: 3 },
+  S_ROAD:      { section: 'SAFETY',  name: '도로·시설물 파손/고장',    department: '도로관리과',   priority: 1 },
+  S_FLOOD:     { section: 'SAFETY',  name: '여름철 침수·수해 위험',    department: '치수과',       priority: 1 },
+  S_AIR:       { section: 'SAFETY',  name: '대기오염',               department: '환경관리과',   priority: 2 },
+  S_WATER:     { section: 'SAFETY',  name: '수질오염',               department: '환경관리과',   priority: 2 },
+  S_FIRE:      { section: 'SAFETY',  name: '소방안전(소화전 등)',      department: '소방서(연계)', priority: 1 },
+  S_ETC:       { section: 'SAFETY',  name: '기타 안전·환경 위험',      department: '안전총괄과',   priority: 2 },
+};
+
+export function subByCode(code) {
+  return SUBCATEGORIES[code] || null;
 }
 
 // 좌표 → 관할 테넌트 판별 (FR-028, R4 의 단순화 버전)

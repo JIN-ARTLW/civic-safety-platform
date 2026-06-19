@@ -37,8 +37,8 @@
       <input id="lng" type="hidden" value="127.489" />
       <p class="muted">📍 <b>충북 청주시</b> 일대가 파일럿 관할입니다.</p>
 
-      <label>3) 위험 유형 (AI 자동 분류 — 필요시 수정)</label>
-      <select id="category"><option value="">자동 분류</option></select>
+      <label>3) 신고서 (AI 자동 작성 — 분야별 양식, 수정 가능)</label>
+      <div id="reportForm" class="hidden"></div>
 
       <div style="margin-top:18px"><button id="submitBtn" onclick="submitReport()" disabled>사진을 먼저 첨부하세요</button></div>
     </div>
@@ -70,6 +70,7 @@
   <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="vision.js"></script>
+  <script src="report-form.js"></script>
   <script src="civic.js"></script>
   <script type="module">
     import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.2.4';
@@ -78,30 +79,29 @@
   </script>
   <script>
     let photoDataUrl = null, photoName = null, aiResult = null;
-    (function () {
-      var sel = document.getElementById('category');
-      CivicAPI.meta().categories.forEach(function (c) { var o = document.createElement('option'); o.value = c.code; o.textContent = c.name; sel.appendChild(o); });
-    })();
+    CivicForm.build(document.getElementById('reportForm'));
     function setSteps(n){ ['s1','s2','s3'].forEach(function(id,i){ document.getElementById(id).classList.toggle('active', i<n); }); }
     function dev(){ var d=localStorage.getItem('dev'); if(!d){ d=Math.random().toString(36).slice(2); localStorage.setItem('dev',d);} return 'anon-'+d; }
 
     async function onPhoto(e){
       var file=e.target.files&&e.target.files[0]; if(!file) return;
       photoName=file.name;
-      try{ if(window.exifr){ var gps=await exifr.gps(file); if(gps&&typeof gps.latitude==='number') setLoc(gps.latitude,gps.longitude,'📷 사진 GPS에서 위치 추출됨'); } }catch(_){}
+      var exifDate=null;
+      try{ if(window.exifr){ var gps=await exifr.gps(file); if(gps&&typeof gps.latitude==='number') setLoc(gps.latitude,gps.longitude,'📷 사진 GPS에서 위치 추출됨'); var meta=await exifr.parse(file).catch(function(){return null;}); if(meta&&meta.DateTimeOriginal) exifDate=meta.DateTimeOriginal; } }catch(_){}
       var url=URL.createObjectURL(file);
       var img=document.getElementById('preview'); document.getElementById('previewWrap').classList.remove('hidden');
       var ai=document.getElementById('aiOut'); var btn=document.getElementById('submitBtn'); setSteps(2);
       img.onload=async function(){
         photoDataUrl=CivicVision.downscale(img,512,0.6);
         ai.textContent='🧠 브라우저 AI 분석 중… (최초 1회 모델 다운로드, 수십 초 걸릴 수 있음)';
-        try{
-          aiResult=await CivicVision.analyze(photoDataUrl,img);
-          var objs=aiResult.objects.length?aiResult.objects.map(function(o){return o.label+'('+(o.score*100).toFixed(0)+'%)';}).join(', '):'';
-          var catName=aiResult.category_code?document.querySelector('#category option[value="'+aiResult.category_code+'"]').textContent:'미정(직접 선택 필요)';
-          ai.innerHTML='🧠 <b>브라우저 비전(CLIP)</b><br>📌 <b>추천 유형</b>: '+catName+' · 신뢰도 '+(aiResult.confidence*100).toFixed(0)+'%<br>📝 '+aiResult.summary+(objs?('<br>🔎 '+objs):'');
-          if(aiResult.category_code) document.getElementById('category').value=aiResult.category_code;
-        }catch(err){ ai.textContent='AI 분석 오류: '+err+' — 유형을 직접 선택해 제출하세요.'; }
+        var result=null;
+        try{ result=await CivicVision.analyze(photoDataUrl,img); }catch(err){ result=null; }
+        if(!result){ ai.textContent='AI 분석 실패 — 분야/유형을 직접 선택하세요.'; result={section:'SAFETY',subcategory:null,confidence:0,objects:[],summary:''}; }
+        aiResult=result;
+        var secName=result.section_name||(CivicVision.TAXONOMY[result.section]?CivicVision.TAXONOMY[result.section].name:'');
+        ai.innerHTML='🧠 <b>브라우저 비전(CLIP)</b><br>📌 <b>'+secName+'</b> · '+(result.subcategory_name||'유형 미정')+' · 신뢰도 '+((result.confidence||0)*100).toFixed(0)+'%<br>📝 '+(result.summary||'');
+        CivicForm.prefill(result, exifDate);
+        document.getElementById('reportForm').classList.remove('hidden');
         enable();
       };
       img.src=url;
@@ -114,31 +114,29 @@
 
     function submitReport(){
       if(!photoDataUrl){ alert('사진을 먼저 첨부하세요.'); return; }
+      var verr=CivicForm.validate(); if(verr){ alert(verr); return; }
+      var f=CivicForm.collect();
       setSteps(3);
-      var data=CivicAPI.submitReport({
+      var data=CivicAPI.submitReport(Object.assign({
         photo: photoDataUrl, photoName: photoName,
         lat: parseFloat(document.getElementById('lat').value), lng: parseFloat(document.getElementById('lng').value),
-        category_code: document.getElementById('category').value || (aiResult&&aiResult.category_code) || undefined,
         confidence: aiResult?aiResult.confidence:undefined, objects: aiResult?aiResult.objects:undefined,
         ai_summary: aiResult?aiResult.summary:undefined, ai_source: aiResult?aiResult.source:undefined,
         device_token: dev(),
-      });
+      }, f));
       if(data.error){ alert('오류: '+data.errors.join(', ')); setSteps(1); return; }
       document.getElementById('result').classList.remove('hidden');
       document.getElementById('rTracking').textContent=data.tracking_no;
       document.getElementById('rBadge').textContent=data.status;
       document.getElementById('trackInput').value=data.tracking_no;
-      var cat=data.category?('분류: '+data.category+' (신뢰도 '+(data.classification_confidence*100).toFixed(0)+'%)'):'분류: 미정';
+      var cat=(data.section?('['+data.section+'] '):'')+(data.subcategory||'미분류')+(data.department?(' · 담당: '+data.department):'');
       cat += data.out_of_jurisdiction?' · ⚠️ 관할 외 지역':(' · 관할: '+data.tenant);
       if(data.clustered_into) cat+=' · 유사 신고와 묶음 처리됨';
       document.getElementById('rCat').textContent=cat;
-      var wrap=document.getElementById('rCandidates'), cb=document.getElementById('candBtns'); cb.innerHTML='';
-      if(data.candidate_categories&&data.candidate_categories.length){ wrap.classList.remove('hidden');
-        data.candidate_categories.forEach(function(code){ var b=document.createElement('button'); b.className='ghost'; b.textContent=code; b.onclick=function(){ document.getElementById('category').value=code; submitReport(); }; cb.appendChild(b); });
-      } else wrap.classList.add('hidden');
+      document.getElementById('rCandidates').classList.add('hidden');
       setSteps(1);
     }
-    function checkStatus(){ var t=document.getElementById('trackInput').value.trim(); if(!t) return; var d=CivicAPI.getStatus(t); var out=document.getElementById('statusOut'); if(!d){ out.textContent='해당 접수번호를 찾을 수 없습니다.'; return; } out.innerHTML='상태: <b>'+d.status+'</b> · 유형: '+(d.category||'미정')+' · 담당: '+(d.department||'-')+' · 접수: '+new Date(d.submitted_at).toLocaleString('ko-KR'); }
+    function checkStatus(){ var t=document.getElementById('trackInput').value.trim(); if(!t) return; var d=CivicAPI.getStatus(t); var out=document.getElementById('statusOut'); if(!d){ out.textContent='해당 접수번호를 찾을 수 없습니다.'; return; } out.innerHTML='상태: <b>'+d.status+'</b> · 유형: '+(d.subcategory||'미정')+' · 담당: '+(d.department||'-')+' · 접수: '+new Date(d.submitted_at).toLocaleString('ko-KR'); }
     function addBubble(text,who,sources){ var c=document.getElementById('chat'); var b=document.createElement('div'); b.className='bubble '+who; b.textContent=text; c.appendChild(b); if(sources&&sources.length){ var s=document.createElement('div'); s.className='sources'; s.textContent='근거: '+sources.join(', '); c.appendChild(s);} c.scrollTop=c.scrollHeight; }
     function sendChat(){ var inp=document.getElementById('chatInput'); var msg=inp.value.trim(); if(!msg) return; addBubble(msg,'me'); inp.value=''; var tn=(msg.match(/CSR-\d{4}-\d{5}/)||[])[0]; var d=CivicAPI.assistant(msg,tn); addBubble(d.reply,'bot',d.sources); }
     window.onPhoto=onPhoto; window.useGeo=useGeo; window.searchAddr=searchAddr; window.submitReport=submitReport; window.checkStatus=checkStatus; window.sendChat=sendChat;

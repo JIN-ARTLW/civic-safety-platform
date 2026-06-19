@@ -94,44 +94,43 @@ async function postReport(req, res) {
   const errors = dom.validateReportInput(b);
   if (errors.length) return send(res, 422, { errors });
 
-  // 1) PII 비식별 (FR-008, R3) — 현재는 플래그만(실제 블러는 후속 #3)
+  // 1) PII 비식별 (FR-008, R3) — 현재는 플래그만(실제 블러는 후속)
   const anon = ai.anonymizePhoto(b.photoName);
-  // 2) 위험 분류 + 신뢰도 (FR-003/004, R2)
-  //    클라이언트(브라우저 비전 모델)가 보낸 실제 탐지 결과를 우선 사용, 없으면 파일명 휴리스틱 폴백
-  let cls;
-  if (b.category_code) {
-    cls = { category_code: b.category_code, confidence: typeof b.confidence === 'number' ? b.confidence : 1, candidate_categories: [] };
-  } else if (typeof b.confidence === 'number' || Array.isArray(b.objects)) {
-    cls = { category_code: null, confidence: b.confidence || 0.4, candidate_categories: ['ROAD_DAMAGE', 'FACILITY_DAMAGE', 'FLOOD_RISK', 'SAFETY_THREAT'] };
-  } else {
-    cls = ai.classifyHazard(b.photoName, b.hint);
-  }
+  // 2) 세부유형(클라이언트 AI 분류) → 분야/부서/우선순위
+  const sub = b.subcategory ? dom.subByCode(b.subcategory) : null;
+  const subCode = sub ? b.subcategory : null;
+  const section = sub ? sub.section : (dom.SECTIONS[b.section] ? b.section : null);
   // 3) 관할 테넌트 라우팅 (FR-028, R4)
   const tenant = dom.resolveTenant(b.lat, b.lng);
-  // 4) 중복 묶음 (FR-020/013)
+  // 4) 중복 묶음 (세부유형+위치)
   const point = { lat: b.lat, lng: b.lng };
   let clustered_into = null;
-  if (tenant && cls.category_code) {
-    const c = store.findOpenCluster(
-      tenant.id, cls.category_code, point, dom.DUPLICATE_RADIUS_M, dom.distanceMeters
-    );
+  if (tenant && subCode) {
+    const c = store.findOpenCluster(tenant.id, subCode, point, dom.DUPLICATE_RADIUS_M, dom.distanceMeters);
     if (c) { c.report_count += 1; store.persist(); clustered_into = c.id; }
     else {
-      const nc = { id: store.uid('cl'), tenant_id: tenant.id, category_code: cls.category_code,
-        centroid: point, report_count: 1, status: 'open' };
+      const nc = { id: store.uid('cl'), tenant_id: tenant.id, category_code: subCode, centroid: point, report_count: 1, status: 'open' };
       store.addCluster(nc); clustered_into = nc.id;
     }
   }
 
-  const cat = cls.category_code ? dom.categoryByCode(cls.category_code) : null;
   const reportId = store.uid('rep');
-  // 실제 업로드 이미지 저장 (경량화 dataURL). 없으면 파일명 표시값 사용.
   const storedPath = saveImage(reportId, b.photo) || anon.anonymizedName;
   const report = {
     id: reportId,
     tracking_no: store.nextTrackingNo(),
     tenant_id: tenant ? tenant.id : null,
     photo_url: storedPath,
+    section: section,
+    section_name: section ? dom.SECTIONS[section] : null,
+    subcategory: subCode,
+    subcategory_name: sub ? sub.name : (b.subcategory_name || null),
+    department: sub ? sub.department : null,
+    title: b.title || null,
+    content: b.content || null,
+    vehicle_no: b.vehicle_no || null,
+    occurred_date: b.occurred_date || null,
+    occurred_time: b.occurred_time || null,
     detected_objects: Array.isArray(b.objects) ? b.objects : [],
     ai_summary: b.ai_summary || null,
     ai_source: b.ai_source || null,
@@ -139,42 +138,31 @@ async function postReport(req, res) {
     location: point,
     captured_at: b.captured_at || null,
     submitted_at: new Date().toISOString(),
-    category_code: cls.category_code,
-    classification_confidence: cls.confidence,
+    classification_confidence: typeof b.confidence === 'number' ? b.confidence : null,
     status: 'received',
-    priority: cat ? cat.priority : 3,
+    priority: sub ? sub.priority : 3,
     cluster_id: clustered_into,
     submitter_account_id: b.account_id || null,
     submitter_device_hash: b.device_token || null,
     purge_after: null,
   };
   store.addReport(report);
-  store.addLog({ id: store.uid('log'), report_id: report.id, actor_id: 'system',
-    action: 'received', detail: { confidence: cls.confidence }, created_at: report.submitted_at });
+  store.addLog({ id: store.uid('log'), report_id: report.id, actor_id: 'system', action: 'received', detail: { subcategory: subCode }, created_at: report.submitted_at });
 
-  const receipt = {
-    tracking_no: report.tracking_no,
-    status: report.status,
-    category: report.category_code,
-    classification_confidence: report.classification_confidence,
-    candidate_categories: cls.candidate_categories,
-    clustered_into,
-    tenant: tenant ? tenant.name : null,
-    out_of_jurisdiction: !tenant,
-  };
-  return send(res, clustered_into && tenant && report.cluster_id !== clustered_into ? 201 : 201, receipt);
+  return send(res, 201, {
+    tracking_no: report.tracking_no, status: report.status,
+    section: report.section_name, subcategory: report.subcategory_name,
+    department: report.department, clustered_into,
+    tenant: tenant ? tenant.name : null, out_of_jurisdiction: !tenant,
+  });
 }
 
 function reportStatus(report) {
-  const cat = report.category_code ? dom.categoryByCode(report.category_code) : null;
   return {
-    tracking_no: report.tracking_no,
-    status: report.status,
-    category: cat ? cat.name : null,
-    department: cat ? cat.department : null,
-    submitted_at: report.submitted_at,
-    location: report.location,
-    photo_url: report.photo_url,
+    tracking_no: report.tracking_no, status: report.status,
+    section: report.section_name || null, subcategory: report.subcategory_name || null,
+    department: report.department || null, title: report.title || null,
+    submitted_at: report.submitted_at, location: report.location, photo_url: report.photo_url,
   };
 }
 
@@ -204,7 +192,7 @@ const server = http.createServer(async (req, res) => {
 
     // GET /v1/meta  (위험유형/테넌트 + Claude 비전 가용 여부 — FE용)
     if (p === '/v1/meta' && req.method === 'GET') {
-      return send(res, 200, { categories: dom.HAZARD_CATEGORIES, tenants: dom.TENANTS.map(t => ({ id: t.id, name: t.name })), claude_vision: claude.available() });
+      return send(res, 200, { sections: dom.SECTIONS, subcategories: dom.SUBCATEGORIES, tenants: dom.TENANTS.map(t => ({ id: t.id, name: t.name })), claude_vision: claude.available() });
     }
 
     // POST /v1/vision/classify  (Claude 비전 — 키는 서버에만, FR-003 전 유형)
@@ -234,12 +222,13 @@ const server = http.createServer(async (req, res) => {
       if (!officer) return send(res, 403, { error: '담당자 인증 필요' });
       const rows = store.listReportsByTenant(officer.tenant_id, {
         status: url.searchParams.get('status') || undefined,
-        category: url.searchParams.get('category') || undefined,
       }).map((r) => {
-        const cat = r.category_code ? dom.categoryByCode(r.category_code) : null;
         const cl = r.cluster_id ? store.getCluster(r.cluster_id) : null;
-        return { id: r.id, tracking_no: r.tracking_no, category: cat ? cat.name : null,
-          department: cat ? cat.department : null, priority: r.priority, status: r.status,
+        return { id: r.id, tracking_no: r.tracking_no,
+          section: r.section_name || null, category: r.subcategory_name || null,
+          department: r.department || null, title: r.title || null, content: r.content || null,
+          vehicle_no: r.vehicle_no || null, occurred_date: r.occurred_date || null, occurred_time: r.occurred_time || null,
+          priority: r.priority, status: r.status,
           location: r.location, photo_url: r.photo_url, detected_objects: r.detected_objects || [],
           ai_summary: r.ai_summary || null, ai_source: r.ai_source || null,
           cluster: cl ? { id: cl.id, report_count: cl.report_count } : null,

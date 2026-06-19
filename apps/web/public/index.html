@@ -37,8 +37,8 @@
       <input id="lng" type="hidden" value="127.489" />
       <p class="muted">📍 <b>충북 청주시</b> 일대가 파일럿 관할입니다. 관할 밖이면 안내됩니다.</p>
 
-      <label>3) 위험 유형 (AI 자동 분류 — 필요시 수정)</label>
-      <select id="category"><option value="">자동 분류</option></select>
+      <label>3) 신고서 (AI 자동 작성 — 분야별 양식, 수정 가능)</label>
+      <div id="reportForm" class="hidden"></div>
 
       <div style="margin-top:18px"><button id="submitBtn" onclick="submitReport()" disabled>사진을 먼저 첨부하세요</button></div>
     </div>
@@ -69,8 +69,9 @@
   <!-- 위치: EXIF GPS 추출(exifr) + 한국 주소검색(다음 우편번호) -->
   <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-  <!-- 브라우저 비전: CLIP 제로샷 분류 (Transformers.js) -->
+  <!-- 브라우저 비전: CLIP 제로샷 분류 (Transformers.js) + 신고 양식 빌더 -->
   <script src="vision.js"></script>
+  <script src="report-form.js"></script>
   <script type="module">
     import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.2.4';
     env.allowLocalModels = false;
@@ -82,11 +83,7 @@
       : '/v1';
     let photoDataUrl = null, photoName = null, aiResult = null;
 
-    (function () {
-      var sel = document.getElementById('category');
-      [['ROAD_DAMAGE','도로 파손(포트홀 등)'],['FACILITY_DAMAGE','시설물 훼손'],['FLOOD_RISK','침수/치수 위험'],['SAFETY_THREAT','안전 위협(표지판/낙하물 등)'],['ETC','기타']]
-        .forEach(function(c){ var o=document.createElement('option'); o.value=c[0]; o.textContent=c[1]; sel.appendChild(o); });
-    })();
+    CivicForm.build(document.getElementById('reportForm'));
 
     function setSteps(n){ ['s1','s2','s3'].forEach(function(id,i){ document.getElementById(id).classList.toggle('active', i<n); }); }
     function dev(){ var d=localStorage.getItem('dev'); if(!d){ d=Math.random().toString(36).slice(2); localStorage.setItem('dev',d);} return 'anon-'+d; }
@@ -94,11 +91,14 @@
     async function onPhoto(e){
       var file = e.target.files && e.target.files[0]; if(!file) return;
       photoName = file.name;
-      // 1) 사진 EXIF GPS 자동 추출
+      // 1) 사진 EXIF: 위치(GPS) + 촬영 일시
+      var exifDate = null;
       try {
         if (window.exifr) {
           var gps = await exifr.gps(file);
           if (gps && typeof gps.latitude === 'number') setLoc(gps.latitude, gps.longitude, '📷 사진 GPS에서 위치 추출됨');
+          var meta = await exifr.parse(file).catch(function(){return null;});
+          if (meta && meta.DateTimeOriginal) exifDate = meta.DateTimeOriginal;
         }
       } catch(_){}
       var url = URL.createObjectURL(file);
@@ -107,31 +107,24 @@
       var ai = document.getElementById('aiOut'); var btn = document.getElementById('submitBtn');
       setSteps(2);
       img.onload = async function(){
-        photoDataUrl = CivicVision.downscale(img, 640, 0.7);   // 경량화 저장본
+        photoDataUrl = CivicVision.downscale(img, 640, 0.7);
         ai.textContent = '🧠 AI 분석 중…';
-        // 1순위: 서버 Claude 비전(키가 서버에 설정된 경우) — 5개 유형 의미 분류
+        var result = null;
+        // 1순위: 서버 Claude 비전(키 설정 시)
         try {
           var cv = await fetch(`${API}/vision/classify`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ photo: photoDataUrl }) });
-          if (cv.ok) {
-            var cd = await cv.json();
-            if (!cd.error && cd.category_code) {
-              aiResult = cd;
-              var catName = document.querySelector('#category option[value="'+cd.category_code+'"]').textContent;
-              ai.innerHTML = '🧠 <b>Claude 비전</b> 분석<br>📌 <b>유형</b>: '+catName+' · 신뢰도 '+(cd.confidence*100).toFixed(0)+'%<br>📝 '+(cd.summary||'');
-              document.getElementById('category').value = cd.category_code;
-              enable(); return;
-            }
-          }
-        } catch(e){ /* 백엔드 없거나 키 미설정 → 로컬 모델로 폴백 */ }
-        // 2순위: 브라우저 비전(CLIP 제로샷) — 5개 유형 의미 분류
-        ai.textContent = '🧠 브라우저 AI 분석 중… (최초 1회 모델 다운로드, 수십 초 걸릴 수 있음)';
-        try {
-          aiResult = await CivicVision.analyze(photoDataUrl, img);
-          var objs = aiResult.objects.length ? aiResult.objects.map(function(o){return o.label+'('+(o.score*100).toFixed(0)+'%)';}).join(', ') : '';
-          var catName2 = aiResult.category_code ? document.querySelector('#category option[value="'+aiResult.category_code+'"]').textContent : '미정(직접 선택 필요)';
-          ai.innerHTML = '🧠 <b>브라우저 비전(CLIP)</b><br>📌 <b>추천 유형</b>: '+catName2+' · 신뢰도 '+(aiResult.confidence*100).toFixed(0)+'%<br>📝 '+aiResult.summary+(objs?('<br>🔎 '+objs):'');
-          if (aiResult.category_code) document.getElementById('category').value = aiResult.category_code;
-        } catch(err){ ai.textContent='AI 분석 오류: '+err+' — 유형을 직접 선택해 제출하세요.'; }
+          if (cv.ok) { var cd = await cv.json(); if (!cd.error && cd.subcategory) result = cd; }
+        } catch(e){}
+        // 2순위: 브라우저 CLIP
+        if (!result) { ai.textContent = '🧠 브라우저 AI 분석 중… (최초 1회 모델 다운로드)'; try { result = await CivicVision.analyze(photoDataUrl, img); } catch(err){ result = null; } }
+        if (!result) { ai.textContent='AI 분석 실패 — 분야/유형을 직접 선택하세요.'; result = { section:'SAFETY', subcategory:null, confidence:0, objects:[], summary:'' }; }
+        aiResult = result;
+        var srcName = result.source==='claude' ? 'Claude 비전' : (result.source==='clip' ? '브라우저 비전(CLIP)' : '폴백');
+        var secName = result.section_name || (CivicVision.TAXONOMY[result.section] ? CivicVision.TAXONOMY[result.section].name : '');
+        ai.innerHTML = '🧠 <b>'+srcName+'</b><br>📌 <b>'+secName+'</b> · '+(result.subcategory_name||'유형 미정')+' · 신뢰도 '+((result.confidence||0)*100).toFixed(0)+'%<br>📝 '+(result.summary||'');
+        // 신고 양식 AI 자동 채움 + 표시
+        CivicForm.prefill(result, exifDate);
+        document.getElementById('reportForm').classList.remove('hidden');
         enable();
       };
       img.src = url;
@@ -175,18 +168,19 @@
 
     async function submitReport(){
       if(!photoDataUrl){ alert('사진을 먼저 첨부하세요.'); return; }
+      var verr = CivicForm.validate(); if(verr){ alert(verr); return; }
+      var f = CivicForm.collect();
       var btn=document.getElementById('submitBtn'); btn.disabled=true; btn.textContent='제출 중...'; setSteps(3);
-      var body={
+      var body=Object.assign({
         photo: photoDataUrl, photoName: photoName,
         lat: parseFloat(document.getElementById('lat').value),
         lng: parseFloat(document.getElementById('lng').value),
-        category_code: document.getElementById('category').value || (aiResult&&aiResult.category_code) || undefined,
         confidence: aiResult ? aiResult.confidence : undefined,
         objects: aiResult ? aiResult.objects : undefined,
         ai_summary: aiResult ? aiResult.summary : undefined,
         ai_source: aiResult ? aiResult.source : undefined,
         device_token: dev(), captured_at: new Date().toISOString(),
-      };
+      }, f);
       try{
         var res=await fetch(`${API}/reports`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         var data=await res.json();
@@ -195,14 +189,11 @@
         document.getElementById('rTracking').textContent=data.tracking_no;
         document.getElementById('rBadge').textContent=data.status;
         document.getElementById('trackInput').value=data.tracking_no;
-        var cat=data.category?('분류: '+data.category+' (신뢰도 '+(data.classification_confidence*100).toFixed(0)+'%)'):'분류: 미정';
+        var cat=(data.section?('['+data.section+'] '):'')+(data.subcategory||'미분류')+(data.department?(' · 담당: '+data.department):'');
         cat += data.out_of_jurisdiction?' · ⚠️ 관할 외 지역':(' · 관할: '+data.tenant);
         if(data.clustered_into) cat+=' · 유사 신고와 묶음 처리됨';
         document.getElementById('rCat').textContent=cat;
-        var wrap=document.getElementById('rCandidates'), cb=document.getElementById('candBtns'); cb.innerHTML='';
-        if(data.candidate_categories&&data.candidate_categories.length){ wrap.classList.remove('hidden');
-          data.candidate_categories.forEach(function(code){ var b=document.createElement('button'); b.className='ghost'; b.textContent=code; b.onclick=function(){ document.getElementById('category').value=code; submitReport(); }; cb.appendChild(b); });
-        } else wrap.classList.add('hidden');
+        document.getElementById('rCandidates').classList.add('hidden');
       }catch(e){ alert('네트워크 오류: '+e); }
       finally{ btn.disabled=false; btn.textContent='신고 제출'; setSteps(1); }
     }
