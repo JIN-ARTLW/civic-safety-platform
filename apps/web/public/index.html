@@ -90,13 +90,28 @@
       setSteps(2);
       img.onload = async function(){
         photoDataUrl = CivicVision.downscale(img, 640, 0.7);   // 경량화 저장본
+        ai.textContent = '🧠 AI 분석 중…';
+        // 1순위: 서버 Claude 비전(키가 서버에 설정된 경우) — 5개 유형 의미 분류
+        try {
+          var cv = await fetch(`${API}/vision/classify`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ photo: photoDataUrl }) });
+          if (cv.ok) {
+            var cd = await cv.json();
+            if (!cd.error && cd.category_code) {
+              aiResult = cd;
+              var catName = document.querySelector('#category option[value="'+cd.category_code+'"]').textContent;
+              ai.innerHTML = '🧠 <b>Claude 비전</b> 분석<br>📌 <b>유형</b>: '+catName+' · 신뢰도 '+(cd.confidence*100).toFixed(0)+'%<br>📝 '+(cd.summary||'');
+              document.getElementById('category').value = cd.category_code;
+              enable(); return;
+            }
+          }
+        } catch(e){ /* 백엔드 없거나 키 미설정 → 로컬 모델로 폴백 */ }
+        // 2순위: 브라우저 비전 모델(COCO-SSD + 노면 분석)
         if (!CivicVision.available()) { ai.textContent='⚠️ AI 모델 로드 실패(오프라인?) — 유형을 직접 선택해 제출하세요.'; enable(); return; }
-        ai.textContent = '🧠 AI 분석 중… (최초 1회 모델 다운로드)';
         try {
           aiResult = await CivicVision.analyze(img);
           var objs = aiResult.objects.length ? aiResult.objects.map(function(o){return o.label+'('+(o.score*100).toFixed(0)+'%)';}).join(', ') : '뚜렷한 객체 없음';
-          var catName = aiResult.category_code ? document.querySelector('#category option[value="'+aiResult.category_code+'"]').textContent : '미정(직접 선택 필요)';
-          ai.innerHTML = '🧠 <b>탐지</b>: '+objs+'<br>📌 <b>추천 유형</b>: '+catName+' · 신뢰도 '+(aiResult.confidence*100).toFixed(0)+'%'+(aiResult.persons?(' · 사람 '+aiResult.persons+'명 감지(비식별 대상)') : '');
+          var catName2 = aiResult.category_code ? document.querySelector('#category option[value="'+aiResult.category_code+'"]').textContent : '미정(직접 선택 필요)';
+          ai.innerHTML = '🧠 <b>탐지(브라우저)</b>: '+objs+'<br>📌 <b>추천 유형</b>: '+catName2+' · 신뢰도 '+(aiResult.confidence*100).toFixed(0)+'%'+(aiResult.persons?(' · 사람 '+aiResult.persons+'명 감지(비식별 대상)') : '');
           if (aiResult.category_code) document.getElementById('category').value = aiResult.category_code;
         } catch(err){ ai.textContent='AI 분석 오류: '+err+' — 유형을 직접 선택해 제출하세요.'; }
         enable();

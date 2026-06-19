@@ -10,6 +10,10 @@ build/
 # 런타임 데이터(로컬 스토어)
 apps/api/data/db.json
 
+# 런타임/시크릿 (터널 PID·로그·API 키)
+.run/
+apps/api/node_modules/
+
 # Python (AI 서비스)
 __pycache__/
 *.pyc

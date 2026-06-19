@@ -9,10 +9,19 @@ import { fileURLToPath } from 'node:url';
 import * as store from './store.mjs';
 import * as dom from './domain.mjs';
 import * as ai from './ai.mjs';
+import * as claude from './vision_claude.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = join(__dirname, 'data', 'uploads');
 mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// API 키를 환경변수 또는 gitignore된 .run/anthropic.key 파일에서 로드 (채팅·git 노출 방지)
+if (!process.env.ANTHROPIC_API_KEY) {
+  try {
+    const k = readFileSync(join(__dirname, '..', '..', '.run', 'anthropic.key'), 'utf8').trim();
+    if (k) process.env.ANTHROPIC_API_KEY = k;
+  } catch { /* 키 파일 없음 → Claude 비전 비활성, 브라우저 모델로 폴백 */ }
+}
 
 // base64 dataURL → 파일 저장. 반환: 상대 경로(uploads/<id>.jpg)
 function saveImage(id, dataUrl) {
@@ -191,9 +200,16 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, reportStatus(r));
     }
 
-    // GET /v1/meta  (위험유형/테넌트 — FE 셀렉트용)
+    // GET /v1/meta  (위험유형/테넌트 + Claude 비전 가용 여부 — FE용)
     if (p === '/v1/meta' && req.method === 'GET') {
-      return send(res, 200, { categories: dom.HAZARD_CATEGORIES, tenants: dom.TENANTS.map(t => ({ id: t.id, name: t.name })) });
+      return send(res, 200, { categories: dom.HAZARD_CATEGORIES, tenants: dom.TENANTS.map(t => ({ id: t.id, name: t.name })), claude_vision: claude.available() });
+    }
+
+    // POST /v1/vision/classify  (Claude 비전 — 키는 서버에만, FR-003 전 유형)
+    if (p === '/v1/vision/classify' && req.method === 'POST') {
+      const b = await readBody(req);
+      const result = await claude.classifyWithClaude(b.photo);
+      return send(res, result.error ? 200 : 200, result);
     }
 
     // GET /v1/uploads/:file  (저장된 (비식별 예정) 이미지 제공)
