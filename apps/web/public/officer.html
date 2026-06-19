@@ -40,7 +40,7 @@
     <div class="card">
       <h3 style="margin-top:0">신고 목록 (우선순위순 · 테넌트 격리)</h3>
       <table>
-        <thead><tr><th>접수번호</th><th>유형</th><th>담당</th><th>우선</th><th>묶음</th><th>상태</th><th>처리</th></tr></thead>
+        <thead><tr><th>사진</th><th>접수번호</th><th>유형(AI탐지)</th><th>담당</th><th>우선</th><th>묶음</th><th>상태</th><th>처리</th></tr></thead>
         <tbody id="rows"><tr><td colspan="7" class="muted">불러오는 중...</td></tr></tbody>
       </table>
     </div>
@@ -52,7 +52,9 @@
   </div>
 
   <script>
-    const API = `${location.protocol}//${location.hostname}:9523/v1`;
+    const API = (location.port === '9503')
+      ? `${location.protocol}//${location.hostname}:9523/v1`
+      : '/v1';
     // 데모 담당자 토큰 (실서비스: Supabase Auth JWT)
     const TOKEN = 'officer:tnt-seoul-jung:admin';
     const H = { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' };
@@ -70,14 +72,17 @@
       document.getElementById('kPending').textContent = all.filter(r=>r.status==='received'||r.status==='in_progress').length;
       document.getElementById('kDone').textContent = all.filter(r=>r.status==='done').length;
 
-      if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="muted">신고 없음</td></tr>`; return; }
+      if (!rows.length) { tbody.innerHTML = `<tr><td colspan="8" class="muted">신고 없음</td></tr>`; return; }
       tbody.innerHTML = '';
       rows.forEach(r => {
         const tr = document.createElement('tr');
         const next = { received:'in_progress', in_progress:'done' }[r.status];
+        const img = (r.photo_url && r.photo_url.indexOf('uploads/')===0) ? `<img src="${API}/${r.photo_url}" style="width:54px;height:40px;object-fit:cover;border-radius:4px" />` : '—';
+        const objs = (r.detected_objects && r.detected_objects.length) ? r.detected_objects.slice(0,3).map(o=>o.label).join(', ') : '';
         tr.innerHTML = `
+          <td>${img}</td>
           <td>${r.tracking_no}</td>
-          <td>${r.category||'미분류'}</td>
+          <td>${r.category||'미분류'}${objs?`<br><span class="muted" style="font-size:11px">🧠 ${objs}</span>`:''}</td>
           <td>${r.department||'-'}</td>
           <td>P${r.priority}</td>
           <td>${r.cluster && r.cluster.report_count>1 ? '×'+r.cluster.report_count : '-'}</td>

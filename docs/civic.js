@@ -104,7 +104,11 @@
         return { error: true, errors: ['사진과 위치(lat,lng)는 필수입니다.'] };
       var d = db();
       var anon = anonymizePhoto(input.photoName);
-      var cls = input.category_code ? { category_code: input.category_code, confidence: 1, candidate_categories: [] } : classify(input.photoName, input.hint);
+      // 클라이언트(브라우저 비전 모델) 탐지 결과 우선, 없으면 파일명 휴리스틱
+      var cls;
+      if (input.category_code) cls = { category_code: input.category_code, confidence: typeof input.confidence === 'number' ? input.confidence : 1, candidate_categories: [] };
+      else if (typeof input.confidence === 'number' || (input.objects && input.objects.length)) cls = { category_code: null, confidence: input.confidence || 0.4, candidate_categories: ['ROAD_DAMAGE', 'FACILITY_DAMAGE', 'FLOOD_RISK', 'SAFETY_THREAT'] };
+      else cls = classify(input.photoName, input.hint);
       var tenant = resolveTenant(input.lat, input.lng);
       var point = { lat: input.lat, lng: input.lng };
       var clustered = null;
@@ -119,7 +123,9 @@
       var cat = cls.category_code ? categoryByCode(cls.category_code) : null;
       var r = {
         id: uid('rep'), tracking_no: 'CSR-2026-' + String(d.seq).padStart(5, '0'),
-        tenant_id: tenant ? tenant.id : null, photo_url: anon.anonymizedName, pii_removed: true,
+        tenant_id: tenant ? tenant.id : null,
+        photo_url: input.photo || anon.anonymizedName,   // 실제 업로드 이미지(dataURL) 저장
+        detected_objects: input.objects || [], pii_removed: true,
         location: point, submitted_at: new Date().toISOString(), category_code: cls.category_code,
         classification_confidence: cls.confidence, status: 'received', priority: cat ? cat.priority : 3,
         cluster_id: clustered, submitter_account_id: input.account_id || null, submitter_device_hash: input.device_token || null, purge_after: null,
@@ -150,7 +156,7 @@
       return rows.map(function (r) {
         var cat = r.category_code ? categoryByCode(r.category_code) : null;
         var cl = r.cluster_id ? d.clusters.filter(function (x) { return x.id === r.cluster_id; })[0] : null;
-        return { id: r.id, tracking_no: r.tracking_no, category: cat ? cat.name : null, department: cat ? cat.department : null, priority: r.priority, status: r.status, location: r.location, photo_url: r.photo_url, cluster: cl ? { id: cl.id, report_count: cl.report_count } : null, submitted_at: r.submitted_at, confidence: r.classification_confidence };
+        return { id: r.id, tracking_no: r.tracking_no, category: cat ? cat.name : null, department: cat ? cat.department : null, priority: r.priority, status: r.status, location: r.location, photo_url: r.photo_url, detected_objects: r.detected_objects || [], cluster: cl ? { id: cl.id, report_count: cl.report_count } : null, submitted_at: r.submitted_at, confidence: r.classification_confidence };
       });
     },
 

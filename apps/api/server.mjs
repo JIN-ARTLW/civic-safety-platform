@@ -3,9 +3,28 @@
 // contracts/openapi.yaml 의 핵심 엔드포인트를 /v1 prefix 로 구현.
 
 import http from 'node:http';
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as store from './store.mjs';
 import * as dom from './domain.mjs';
 import * as ai from './ai.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const UPLOAD_DIR = join(__dirname, 'data', 'uploads');
+mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// base64 dataURL → 파일 저장. 반환: 상대 경로(uploads/<id>.jpg)
+function saveImage(id, dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string') return null;
+  const m = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+  if (!m) return null;
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  const file = `${id}.${ext}`;
+  try { writeFileSync(join(UPLOAD_DIR, file), Buffer.from(m[2], 'base64')); return `uploads/${file}`; }
+  catch { return null; }
+}
+const IMG_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
 
 const PORT = Number(process.env.API_PORT || 9523);
 const HOST = '0.0.0.0';
@@ -66,12 +85,18 @@ async function postReport(req, res) {
   const errors = dom.validateReportInput(b);
   if (errors.length) return send(res, 422, { errors });
 
-  // 1) PII 비식별 (FR-008, R3)
+  // 1) PII 비식별 (FR-008, R3) — 현재는 플래그만(실제 블러는 후속 #3)
   const anon = ai.anonymizePhoto(b.photoName);
   // 2) 위험 분류 + 신뢰도 (FR-003/004, R2)
-  const cls = b.category_code
-    ? { category_code: b.category_code, confidence: 1, candidate_categories: [] }
-    : ai.classifyHazard(b.photoName, b.hint);
+  //    클라이언트(브라우저 비전 모델)가 보낸 실제 탐지 결과를 우선 사용, 없으면 파일명 휴리스틱 폴백
+  let cls;
+  if (b.category_code) {
+    cls = { category_code: b.category_code, confidence: typeof b.confidence === 'number' ? b.confidence : 1, candidate_categories: [] };
+  } else if (typeof b.confidence === 'number' || Array.isArray(b.objects)) {
+    cls = { category_code: null, confidence: b.confidence || 0.4, candidate_categories: ['ROAD_DAMAGE', 'FACILITY_DAMAGE', 'FLOOD_RISK', 'SAFETY_THREAT'] };
+  } else {
+    cls = ai.classifyHazard(b.photoName, b.hint);
+  }
   // 3) 관할 테넌트 라우팅 (FR-028, R4)
   const tenant = dom.resolveTenant(b.lat, b.lng);
   // 4) 중복 묶음 (FR-020/013)
@@ -90,11 +115,15 @@ async function postReport(req, res) {
   }
 
   const cat = cls.category_code ? dom.categoryByCode(cls.category_code) : null;
+  const reportId = store.uid('rep');
+  // 실제 업로드 이미지 저장 (경량화 dataURL). 없으면 파일명 표시값 사용.
+  const storedPath = saveImage(reportId, b.photo) || anon.anonymizedName;
   const report = {
-    id: store.uid('rep'),
+    id: reportId,
     tracking_no: store.nextTrackingNo(),
     tenant_id: tenant ? tenant.id : null,
-    photo_url: anon.anonymizedName,
+    photo_url: storedPath,
+    detected_objects: Array.isArray(b.objects) ? b.objects : [],
     pii_removed: anon.piiRemoved,
     location: point,
     captured_at: b.captured_at || null,
@@ -167,6 +196,19 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { categories: dom.HAZARD_CATEGORIES, tenants: dom.TENANTS.map(t => ({ id: t.id, name: t.name })) });
     }
 
+    // GET /v1/uploads/:file  (저장된 (비식별 예정) 이미지 제공)
+    let mi = p.match(/^\/v1\/uploads\/([A-Za-z0-9._-]+)$/);
+    if (mi && req.method === 'GET') {
+      const file = mi[1];
+      const fp = join(UPLOAD_DIR, file);
+      if (!existsSync(fp)) return send(res, 404, { error: 'no image' });
+      const ext = (file.split('.').pop() || '').toLowerCase();
+      res.statusCode = 200;
+      res.setHeader('Content-Type', IMG_MIME[ext] || 'application/octet-stream');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.end(readFileSync(fp));
+    }
+
     // ---- 담당자 (US2) ----
     // GET /v1/officer/reports
     if (p === '/v1/officer/reports' && req.method === 'GET') {
@@ -180,7 +222,7 @@ const server = http.createServer(async (req, res) => {
         const cl = r.cluster_id ? store.getCluster(r.cluster_id) : null;
         return { id: r.id, tracking_no: r.tracking_no, category: cat ? cat.name : null,
           department: cat ? cat.department : null, priority: r.priority, status: r.status,
-          location: r.location, photo_url: r.photo_url,
+          location: r.location, photo_url: r.photo_url, detected_objects: r.detected_objects || [],
           cluster: cl ? { id: cl.id, report_count: cl.report_count } : null,
           submitted_at: r.submitted_at, confidence: r.classification_confidence };
       });
