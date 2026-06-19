@@ -1,0 +1,276 @@
+openapi: 3.1.0
+info:
+  title: Civic Safety Platform API
+  version: 0.1.0
+  description: >
+    시민 참여형 스마트시티 안전 플랫폼의 외부 인터페이스 계약.
+    멀티테넌트(지자체)·하이브리드 신원(익명/로그인)·AI 자동 분류 기반.
+    명세 spec.md(FR-001~028) 및 data-model.md 준수.
+servers:
+  - url: https://api.example.gov/v1
+tags:
+  - name: reports
+    description: 시민 신고 접수/조회
+  - name: officer
+    description: 지자체 담당자 관제/처리
+  - name: assistant
+    description: 대화형 안내(RAG 챗봇)
+  - name: tenants
+    description: 테넌트/설정(관리자)
+
+paths:
+  /reports:
+    post:
+      tags: [reports]
+      summary: 위험 신고 접수 (FR-001~007, 익명/로그인 공통)
+      description: 사진+위치로 신고 접수. 사진은 서버에서 비식별 처리(FR-008) 후 저장. 자동 분류(FR-003) 결과를 동기 반환(목표 3초, SC-002).
+      security:
+        - {}                      # 익명 허용 (FR-024)
+        - bearerAuth: []          # 로그인 시민
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo, lat, lng]
+              properties:
+                photo: { type: string, format: binary, description: 원본 사진(서버에서 비식별 처리 후 폐기) }
+                lat: { type: number }
+                lng: { type: number }
+                captured_at: { type: string, format: date-time }
+                category_code: { type: string, description: 시민이 선택/수정한 유형(저신뢰 시, FR-004) }
+                device_token: { type: string, description: 익명 신고 기기/세션 식별 토큰 }
+      responses:
+        '201':
+          description: 접수 완료
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportReceipt' }
+        '409':
+          description: 중복 신고 → 기존 묶음에 합류 (FR-020)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportReceipt' }
+        '422':
+          description: 위치 누락/분류 불가 등 검증 실패
+        '429':
+          description: 남용 제한 초과 (FR-021)
+
+  /reports/{trackingNo}:
+    get:
+      tags: [reports]
+      summary: 접수 번호로 처리 상태 조회 (FR-010, 익명 가능)
+      security:
+        - {}
+      parameters:
+        - { name: trackingNo, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 신고 상태
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportStatus' }
+        '404': { description: 없음 }
+
+  /me/reports:
+    get:
+      tags: [reports]
+      summary: 로그인 시민의 신고 이력 (FR-010)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 내 신고 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReportStatus' }
+
+  /me/rewards:
+    get:
+      tags: [reports]
+      summary: 로그인 시민 보상 잔액/이력 (FR-023)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 보상 정보
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RewardSummary' }
+
+  /officer/reports:
+    get:
+      tags: [officer]
+      summary: 관제 신고 목록(테넌트 격리, 우선순위/지도용, FR-011/012/013)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [received, in_progress, done, rejected, invalid] } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: bbox, in: query, description: 지도 영역 필터(minLng,minLat,maxLng,maxLat), schema: { type: string } }
+        - { name: clustered, in: query, schema: { type: boolean, default: true } }
+      responses:
+        '200':
+          description: 신고(묶음 포함) 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OfficerReport' }
+        '403': { description: 테넌트/권한 위반 (FR-025/026) }
+
+  /officer/reports/{id}/status:
+    patch:
+      tags: [officer]
+      summary: 처리 상태 변경 (FR-014) + 이력 기록 + 시민 알림(FR-017)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [received, in_progress, done, rejected, invalid] }
+                note: { type: string }
+      responses:
+        '200': { description: 변경됨 }
+        '403': { description: 권한/테넌트 위반 }
+
+  /officer/reports/{id}/document:
+    post:
+      tags: [officer]
+      summary: 표준 공문서 초안 자동 생성 (FR-015)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format: { type: string, enum: [docx, pdf], default: docx }
+      responses:
+        '201':
+          description: 초안 생성됨(검토 대기)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OfficialDocument' }
+
+  /assistant/messages:
+    post:
+      tags: [assistant]
+      summary: 대화형 안내 질의 (FR-018/019, RAG 근거 기반)
+      security:
+        - {}
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string }
+                tracking_no: { type: string, description: 특정 신고 진행 상황 질의 시 }
+      responses:
+        '200':
+          description: 안내 응답(근거 출처 포함, 근거 없으면 담당 창구 안내)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssistantReply' }
+
+  /tenants/{id}/settings:
+    put:
+      tags: [tenants]
+      summary: 테넌트 운영 설정(위험유형/부서매핑/양식/보상정책) (FR-027)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: 갱신됨 }
+        '403': { description: 관리자 아님 }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ReportReceipt:
+      type: object
+      properties:
+        tracking_no: { type: string }
+        status: { type: string }
+        category: { type: string, nullable: true }
+        classification_confidence: { type: number, nullable: true }
+        candidate_categories:
+          type: array
+          items: { type: string }
+          description: 저신뢰 시 시민 선택용 후보(FR-004)
+        clustered_into: { type: string, nullable: true, description: 중복 합류 묶음 id }
+    ReportStatus:
+      type: object
+      properties:
+        tracking_no: { type: string }
+        status: { type: string }
+        category: { type: string, nullable: true }
+        submitted_at: { type: string, format: date-time }
+        last_updated_at: { type: string, format: date-time }
+        next_step: { type: string, nullable: true }
+    OfficerReport:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tracking_no: { type: string }
+        category: { type: string, nullable: true }
+        priority: { type: integer }
+        status: { type: string }
+        location: { type: object, properties: { lat: { type: number }, lng: { type: number } } }
+        photo_url: { type: string, description: 비식별 처리본 }
+        cluster:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string }
+            report_count: { type: integer }
+        submitted_at: { type: string, format: date-time }
+    OfficialDocument:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        format: { type: string, enum: [docx, pdf] }
+        file_url: { type: string, nullable: true }
+        review_status: { type: string, enum: [draft, reviewed, finalized] }
+    AssistantReply:
+      type: object
+      properties:
+        reply: { type: string }
+        sources:
+          type: array
+          items: { type: string }
+          description: 근거 출처(없으면 빈 배열 + 담당 창구 안내)
+        grounded: { type: boolean }
+    RewardSummary:
+      type: object
+      properties:
+        balance: { type: integer }
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              report_tracking_no: { type: string }
+              points: { type: integer }
+              created_at: { type: string, format: date-time }

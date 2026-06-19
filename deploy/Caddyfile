@@ -1,0 +1,23 @@
+# p3.sumzip.com 리버스 프록시 (Caddy — 자동 HTTPS)
+# 프론트(9503)를 루트로, 백엔드(9523)를 /v1/* 로 라우팅.
+# 사용: caddy run --config deploy/Caddyfile
+
+p3.sumzip.com {
+	encode gzip
+
+	# 백엔드 API
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:9523
+	}
+
+	# 프론트엔드 정적
+	handle {
+		reverse_proxy 127.0.0.1:9503
+	}
+}
+
+# HTTP(80)에서도 접근 허용하려면 아래 블록 사용(개발/내부망)
+# http://p3.sumzip.com {
+# 	handle /v1/* { reverse_proxy 127.0.0.1:9523 }
+# 	handle { reverse_proxy 127.0.0.1:9503 }
+# }

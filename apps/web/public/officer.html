@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>관제 대시보드 · Civic Safety</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="officer">
+  <div class="topbar">
+    <h1>🏛 지자체 관제 대시보드</h1>
+    <span class="tag" id="tenantTag">서울 중구청 (파일럿)</span>
+    <a href="/">← 시민 신고</a>
+  </div>
+
+  <div class="wrap">
+    <div class="row">
+      <div class="card"><div class="muted">전체 신고</div><div class="kpi" id="kTotal">0</div></div>
+      <div class="card"><div class="muted">처리 대기</div><div class="kpi" id="kPending">0</div></div>
+      <div class="card"><div class="muted">처리 완료</div><div class="kpi" id="kDone">0</div></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="align-items:flex-end">
+        <div>
+          <label>상태 필터</label>
+          <select id="fStatus" onchange="load()">
+            <option value="">전체</option>
+            <option value="received">접수</option>
+            <option value="in_progress">처리중</option>
+            <option value="done">완료</option>
+            <option value="rejected">반려</option>
+            <option value="invalid">무효</option>
+          </select>
+        </div>
+        <div><label>&nbsp;</label><button class="ghost" onclick="load()">새로고침</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">신고 목록 (우선순위순 · 테넌트 격리)</h3>
+      <table>
+        <thead><tr><th>접수번호</th><th>유형</th><th>담당</th><th>우선</th><th>묶음</th><th>상태</th><th>처리</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="7" class="muted">불러오는 중...</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card hidden" id="docCard">
+      <h3 style="margin-top:0">📄 자동 생성 공문서 초안</h3>
+      <pre id="docContent" style="white-space:pre-wrap; background:#f4f4f4; padding:14px; font-size:13px"></pre>
+    </div>
+  </div>
+
+  <script>
+    const API = `${location.protocol}//${location.hostname}:9523/v1`;
+    // 데모 담당자 토큰 (실서비스: Supabase Auth JWT)
+    const TOKEN = 'officer:tnt-seoul-jung:admin';
+    const H = { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' };
+
+    async function load() {
+      const status = document.getElementById('fStatus').value;
+      const url = `${API}/officer/reports` + (status ? `?status=${status}` : '');
+      const res = await fetch(url, { headers: H });
+      const tbody = document.getElementById('rows');
+      if (!res.ok) { tbody.innerHTML = `<tr><td colspan="7" class="muted">인증/조회 오류 (${res.status})</td></tr>`; return; }
+      const rows = await res.json();
+      // KPI
+      const all = await (await fetch(`${API}/officer/reports`, { headers: H })).json();
+      document.getElementById('kTotal').textContent = all.length;
+      document.getElementById('kPending').textContent = all.filter(r=>r.status==='received'||r.status==='in_progress').length;
+      document.getElementById('kDone').textContent = all.filter(r=>r.status==='done').length;
+
+      if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="muted">신고 없음</td></tr>`; return; }
+      tbody.innerHTML = '';
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const next = { received:'in_progress', in_progress:'done' }[r.status];
+        tr.innerHTML = `
+          <td>${r.tracking_no}</td>
+          <td>${r.category||'미분류'}</td>
+          <td>${r.department||'-'}</td>
+          <td>P${r.priority}</td>
+          <td>${r.cluster && r.cluster.report_count>1 ? '×'+r.cluster.report_count : '-'}</td>
+          <td><span class="badge ${r.status}">${r.status}</span></td>
+          <td></td>`;
+        const actions = tr.lastElementChild;
+        if (next) {
+          const b = document.createElement('button'); b.className='ghost'; b.textContent = next==='in_progress'?'처리시작':'완료';
+          b.onclick = () => changeStatus(r.id, next);
+          actions.appendChild(b);
+        }
+        const d = document.createElement('button'); d.className='ghost'; d.textContent='공문서'; d.style.marginLeft='6px';
+        d.onclick = () => genDoc(r.id);
+        actions.appendChild(d);
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function changeStatus(id, status) {
+      const res = await fetch(`${API}/officer/reports/${id}/status`, { method:'PATCH', headers:H, body: JSON.stringify({ status }) });
+      if (!res.ok) { const e=await res.json(); alert('오류: '+(e.error||res.status)); return; }
+      load();
+    }
+    async function genDoc(id) {
+      const res = await fetch(`${API}/officer/reports/${id}/document`, { method:'POST', headers:H, body:'{}' });
+      const d = await res.json();
+      document.getElementById('docCard').classList.remove('hidden');
+      document.getElementById('docContent').textContent = d.content || JSON.stringify(d);
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+    load();
+  </script>
+</body>
+</html>

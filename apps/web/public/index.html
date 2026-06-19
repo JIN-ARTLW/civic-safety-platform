@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>시민 안전 신고 · Civic Safety</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="citizen">
+  <div class="topbar">
+    <h1>📷 시민 안전 신고</h1>
+    <span class="tag">사진 한 장으로 3초 신고</span>
+    <a href="/officer">관제 대시보드 →</a>
+  </div>
+
+  <div class="wrap">
+    <!-- 신고하기 -->
+    <div class="card">
+      <div class="steps">
+        <div class="step active" id="s1"></div>
+        <div class="step" id="s2"></div>
+        <div class="step" id="s3"></div>
+      </div>
+      <h2 style="margin-top:0">위험 요소 신고하기</h2>
+
+      <label>1) 사진 (파일명 또는 촬영 — 데모: 파일명 입력)</label>
+      <input id="photo" placeholder="예: pothole_road.jpg / 시설_훼손.jpg" value="pothole_road.jpg" />
+      <p class="muted">사진 속 얼굴·번호판은 자동 비식별(블러) 처리되어 저장됩니다.</p>
+
+      <div class="row">
+        <div>
+          <label>2) 위치 (위도)</label>
+          <input id="lat" type="number" step="0.0001" value="37.5636" />
+        </div>
+        <div>
+          <label>위치 (경도)</label>
+          <input id="lng" type="number" step="0.0001" value="126.9976" />
+        </div>
+      </div>
+      <p class="muted">📍 서울 중구 일대(파일럿 관할). 관할 밖이면 안내됩니다.</p>
+
+      <label>3) 위험 유형 (자동 분류 — 비워두면 AI가 분류)</label>
+      <select id="category"><option value="">자동 분류</option></select>
+
+      <div style="margin-top:18px">
+        <button id="submitBtn" onclick="submitReport()">신고 제출</button>
+      </div>
+    </div>
+
+    <!-- 결과 -->
+    <div class="card hidden" id="result">
+      <h3 style="margin-top:0">✅ 접수 완료</h3>
+      <p>접수번호: <b id="rTracking"></b> <span id="rBadge" class="badge received"></span></p>
+      <p id="rCat" class="muted"></p>
+      <div id="rCandidates" class="hidden">
+        <p class="muted">AI 신뢰도가 낮습니다. 유형을 선택해 다시 제출해 주세요:</p>
+        <div id="candBtns" class="row"></div>
+      </div>
+    </div>
+
+    <!-- 상태 조회 -->
+    <div class="card">
+      <h3 style="margin-top:0">🔎 접수번호로 상태 조회</h3>
+      <div class="row">
+        <input id="trackInput" placeholder="CSR-2026-00001" />
+        <button class="ghost" onclick="checkStatus()">조회</button>
+      </div>
+      <p id="statusOut" class="muted"></p>
+    </div>
+
+    <!-- 대화형 안내 -->
+    <div class="card">
+      <h3 style="margin-top:0">💬 AI 대화형 안내</h3>
+      <div class="chat" id="chat"></div>
+      <div class="row" style="margin-top:10px">
+        <input id="chatInput" placeholder="예: CSR-2026-00001 어떻게 됐나요?" />
+        <button class="ghost" onclick="sendChat()">전송</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = `${location.protocol}//${location.hostname}:9523/v1`;
+
+    async function loadMeta() {
+      try {
+        const m = await (await fetch(`${API}/meta`)).json();
+        const sel = document.getElementById('category');
+        m.categories.forEach(c => {
+          const o = document.createElement('option'); o.value = c.code; o.textContent = c.name; sel.appendChild(o);
+        });
+      } catch (e) { /* API 미연결 시 무시 */ }
+    }
+
+    function setSteps(n) { ['s1','s2','s3'].forEach((id,i)=>document.getElementById(id).classList.toggle('active', i<n)); }
+
+    async function submitReport() {
+      const btn = document.getElementById('submitBtn'); btn.disabled = true; btn.textContent='제출 중...';
+      setSteps(2);
+      const body = {
+        photoName: document.getElementById('photo').value,
+        lat: parseFloat(document.getElementById('lat').value),
+        lng: parseFloat(document.getElementById('lng').value),
+        category_code: document.getElementById('category').value || undefined,
+        device_token: 'anon-' + (localStorage.getItem('dev') || (localStorage.setItem('dev', Math.random().toString(36).slice(2)), localStorage.getItem('dev'))),
+        captured_at: new Date().toISOString(),
+      };
+      try {
+        const res = await fetch(`${API}/reports`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (!res.ok) { alert('오류: ' + JSON.stringify(data.errors||data)); return; }
+        setSteps(3);
+        document.getElementById('result').classList.remove('hidden');
+        document.getElementById('rTracking').textContent = data.tracking_no;
+        document.getElementById('rBadge').textContent = data.status;
+        document.getElementById('trackInput').value = data.tracking_no;
+        let cat = data.category ? `분류: ${data.category} (신뢰도 ${(data.classification_confidence*100).toFixed(0)}%)` : '분류: 미정';
+        if (data.out_of_jurisdiction) cat += ' · ⚠️ 관할 외 지역';
+        else cat += ` · 관할: ${data.tenant}`;
+        if (data.clustered_into) cat += ' · 유사 신고와 묶음 처리됨';
+        document.getElementById('rCat').textContent = cat;
+        const candWrap = document.getElementById('rCandidates'), cb = document.getElementById('candBtns');
+        cb.innerHTML='';
+        if (data.candidate_categories && data.candidate_categories.length) {
+          candWrap.classList.remove('hidden');
+          data.candidate_categories.forEach(code => {
+            const b = document.createElement('button'); b.className='ghost'; b.textContent=code;
+            b.onclick=()=>{ document.getElementById('category').value=code; submitReport(); };
+            cb.appendChild(b);
+          });
+        } else candWrap.classList.add('hidden');
+      } catch (e) { alert('네트워크 오류: ' + e); }
+      finally { btn.disabled=false; btn.textContent='신고 제출'; setSteps(1); }
+    }
+
+    async function checkStatus() {
+      const t = document.getElementById('trackInput').value.trim();
+      if (!t) return;
+      const res = await fetch(`${API}/reports/${encodeURIComponent(t)}`);
+      const out = document.getElementById('statusOut');
+      if (!res.ok) { out.textContent='해당 접수번호를 찾을 수 없습니다.'; return; }
+      const d = await res.json();
+      out.innerHTML = `상태: <b>${d.status}</b> · 유형: ${d.category||'미정'} · 담당: ${d.department||'-'} · 접수: ${new Date(d.submitted_at).toLocaleString('ko-KR')}`;
+    }
+
+    function addBubble(text, who, sources) {
+      const c = document.getElementById('chat');
+      const b = document.createElement('div'); b.className='bubble '+who; b.textContent=text;
+      c.appendChild(b);
+      if (sources && sources.length) { const s=document.createElement('div'); s.className='sources'; s.textContent='근거: '+sources.join(', '); c.appendChild(s); }
+      c.scrollTop = c.scrollHeight;
+    }
+    async function sendChat() {
+      const inp = document.getElementById('chatInput'); const msg = inp.value.trim(); if (!msg) return;
+      addBubble(msg, 'me'); inp.value='';
+      const tn = (msg.match(/CSR-\d{4}-\d{5}/)||[])[0];
+      const res = await fetch(`${API}/assistant/messages`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: msg, tracking_no: tn }) });
+      const d = await res.json();
+      addBubble(d.reply, 'bot', d.sources);
+    }
+
+    loadMeta();
+    addBubble('안녕하세요! 위험을 신고하거나 접수번호로 진행 상황을 물어보세요.', 'bot');
+  </script>
+</body>
+</html>
