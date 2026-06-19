@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>시민 안전 신고 · Civic Safety</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="citizen">
+<div style="background:#1d4ed8;color:#fff;padding:8px 14px;text-align:center;font-size:13px">🔒 중간발표 백업본 · v0.1-midterm (읽기용 스냅샷, 갱신 안 됨) — 최신 개발본은 <a href="../" style="color:#cfe0ff;font-weight:700">여기로</a></div>
+  <div class="topbar">
+    <h1>📷 시민 안전 신고</h1>
+    <span class="tag">사진 한 장으로 3초 신고 · 실제 AI 분석</span>
+    <a href="officer.html">관제 대시보드 →</a>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="steps"><div class="step active" id="s1"></div><div class="step" id="s2"></div><div class="step" id="s3"></div></div>
+      <h2 style="margin-top:0">위험 요소 신고하기</h2>
+
+      <label>1) 사진 촬영/업로드 (실제 이미지를 AI가 분석합니다)</label>
+      <input id="photoFile" type="file" accept="image/*" capture="environment" onchange="onPhoto(event)" />
+      <div id="previewWrap" class="hidden" style="margin-top:10px">
+        <img id="preview" style="max-width:100%;border-radius:10px" alt="미리보기" />
+        <p id="aiOut" class="muted">🧠 AI 분석 대기…</p>
+      </div>
+      <p class="muted">사진은 자동 분석 후 비식별 처리되어 저장됩니다.</p>
+
+      <label>2) 위치</label>
+      <p id="locStatus" class="muted">사진 GPS·현재 위치·주소 검색 중 하나로 지정하세요.</p>
+      <div class="row" style="margin-bottom:8px">
+        <button class="ghost" type="button" onclick="useGeo()">📍 현재 위치</button>
+        <button class="ghost" type="button" onclick="searchAddr()">🔎 주소 검색</button>
+      </div>
+      <input id="addr" placeholder="선택/검색된 주소가 표시됩니다" readonly />
+      <input id="lat" type="hidden" value="36.6424" />
+      <input id="lng" type="hidden" value="127.489" />
+      <p class="muted">📍 <b>충북 청주시</b> 일대가 파일럿 관할입니다.</p>
+
+      <label>3) 신고서 (AI 자동 작성 — 분야별 양식, 수정 가능)</label>
+      <div id="reportForm" class="hidden"></div>
+
+      <div style="margin-top:18px"><button id="submitBtn" onclick="submitReport()" disabled>사진을 먼저 첨부하세요</button></div>
+    </div>
+
+    <div class="card hidden" id="result">
+      <h3 style="margin-top:0">✅ 접수 완료</h3>
+      <p>접수번호: <b id="rTracking"></b> <span id="rBadge" class="badge received"></span></p>
+      <p id="rCat" class="muted"></p>
+      <div id="rCandidates" class="hidden">
+        <p class="muted">AI 신뢰도가 낮습니다. 유형을 선택해 다시 제출해 주세요:</p>
+        <div id="candBtns" class="row"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">🔎 접수번호로 상태 조회</h3>
+      <div class="row"><input id="trackInput" placeholder="CSR-2026-00001" /><button class="ghost" onclick="checkStatus()">조회</button></div>
+      <p id="statusOut" class="muted"></p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">💬 AI 대화형 안내</h3>
+      <div class="chat" id="chat"></div>
+      <div class="row" style="margin-top:10px"><input id="chatInput" placeholder="예: CSR-2026-00001 어떻게 됐나요?" /><button class="ghost" onclick="sendChat()">전송</button></div>
+    </div>
+    <p class="muted" style="text-align:center">정적 데모 · 사진/데이터는 브라우저(localStorage)에 저장됩니다.</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
+  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+  <script src="vision.js"></script>
+  <script src="report-form.js"></script>
+  <script src="civic.js"></script>
+  <script type="module">
+    import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.2.4';
+    env.allowLocalModels = false;
+    window.CivicVision.setPipeline(pipeline, env);
+  </script>
+  <script>
+    let photoDataUrl = null, photoName = null, aiResult = null;
+    CivicForm.build(document.getElementById('reportForm'));
+    function setSteps(n){ ['s1','s2','s3'].forEach(function(id,i){ document.getElementById(id).classList.toggle('active', i<n); }); }
+    function dev(){ var d=localStorage.getItem('dev'); if(!d){ d=Math.random().toString(36).slice(2); localStorage.setItem('dev',d);} return 'anon-'+d; }
+
+    async function onPhoto(e){
+      var file=e.target.files&&e.target.files[0]; if(!file) return;
+      photoName=file.name;
+      var exifDate=null;
+      try{ if(window.exifr){ var gps=await exifr.gps(file); if(gps&&typeof gps.latitude==='number') setLoc(gps.latitude,gps.longitude,'📷 사진 GPS에서 위치 추출됨'); var meta=await exifr.parse(file).catch(function(){return null;}); if(meta&&meta.DateTimeOriginal) exifDate=meta.DateTimeOriginal; } }catch(_){}
+      var url=URL.createObjectURL(file);
+      var img=document.getElementById('preview'); document.getElementById('previewWrap').classList.remove('hidden');
+      var ai=document.getElementById('aiOut'); var btn=document.getElementById('submitBtn'); setSteps(2);
+      img.onload=async function(){
+        photoDataUrl=CivicVision.downscale(img,512,0.6);
+        ai.textContent='🧠 브라우저 AI 분석 중… (최초 1회 모델 다운로드, 수십 초 걸릴 수 있음)';
+        var result=null;
+        try{ result=await CivicVision.analyze(photoDataUrl,img); }catch(err){ result=null; }
+        if(!result){ ai.textContent='AI 분석 실패 — 분야/유형을 직접 선택하세요.'; result={section:'SAFETY',subcategory:null,confidence:0,objects:[],summary:''}; }
+        aiResult=result;
+        var secName=result.section_name||(CivicVision.TAXONOMY[result.section]?CivicVision.TAXONOMY[result.section].name:'');
+        ai.innerHTML='🧠 <b>브라우저 비전(CLIP)</b><br>📌 <b>'+secName+'</b> · '+(result.subcategory_name||'유형 미정')+' · 신뢰도 '+((result.confidence||0)*100).toFixed(0)+'%<br>📝 '+(result.summary||'');
+        CivicForm.prefill(result, exifDate);
+        document.getElementById('reportForm').classList.remove('hidden');
+        enable();
+      };
+      img.src=url;
+      function enable(){ btn.disabled=false; btn.textContent='신고 제출'; setSteps(1); }
+    }
+    function setLoc(lat,lng,label){ document.getElementById('lat').value=(+lat).toFixed(5); document.getElementById('lng').value=(+lng).toFixed(5); if(label) document.getElementById('locStatus').textContent=label+' ('+(+lat).toFixed(5)+', '+(+lng).toFixed(5)+')'; }
+    function useGeo(){ var st=document.getElementById('locStatus'); if(!navigator.geolocation){ st.textContent='이 브라우저는 위치를 지원하지 않습니다.'; return; } st.textContent='현재 위치 확인 중…'; navigator.geolocation.getCurrentPosition(function(p){ setLoc(p.coords.latitude,p.coords.longitude,'📍 현재 위치'); }, function(){ st.textContent='위치 권한이 거부되었습니다. 주소 검색을 이용하세요.'; }, {enableHighAccuracy:true,timeout:8000}); }
+    function searchAddr(){ if(!window.daum||!daum.Postcode){ alert('주소 검색 모듈 로드 실패(네트워크 확인)'); return; } new daum.Postcode({ oncomplete:function(data){ var addr=data.roadAddress||data.jibunAddress; document.getElementById('addr').value=addr; document.getElementById('locStatus').textContent='주소 좌표 변환 중… ('+addr+')'; geocode(addr); }}).open(); }
+    async function geocode(addr){ try{ var u='https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=kr&q='+encodeURIComponent(addr); var r=await fetch(u,{headers:{'Accept':'application/json'}}); var j=await r.json(); if(j&&j[0]){ setLoc(j[0].lat,j[0].lon,'🔎 '+addr); } else { document.getElementById('locStatus').textContent='좌표를 못 찾았습니다. 현재 위치를 쓰거나 위/경도를 직접 입력하세요.'; } }catch(e){ document.getElementById('locStatus').textContent='지오코딩 오류 — 위/경도를 직접 입력하세요.'; } }
+
+    function submitReport(){
+      if(!photoDataUrl){ alert('사진을 먼저 첨부하세요.'); return; }
+      var verr=CivicForm.validate(); if(verr){ alert(verr); return; }
+      var f=CivicForm.collect();
+      setSteps(3);
+      var data=CivicAPI.submitReport(Object.assign({
+        photo: photoDataUrl, photoName: photoName,
+        lat: parseFloat(document.getElementById('lat').value), lng: parseFloat(document.getElementById('lng').value),
+        confidence: aiResult?aiResult.confidence:undefined, objects: aiResult?aiResult.objects:undefined,
+        ai_summary: aiResult?aiResult.summary:undefined, ai_source: aiResult?aiResult.source:undefined,
+        device_token: dev(),
+      }, f));
+      if(data.error){ alert('오류: '+data.errors.join(', ')); setSteps(1); return; }
+      document.getElementById('result').classList.remove('hidden');
+      document.getElementById('rTracking').textContent=data.tracking_no;
+      document.getElementById('rBadge').textContent=data.status;
+      document.getElementById('trackInput').value=data.tracking_no;
+      var cat=(data.section?('['+data.section+'] '):'')+(data.subcategory||'미분류')+(data.department?(' · 담당: '+data.department):'');
+      cat += data.out_of_jurisdiction?' · ⚠️ 관할 외 지역':(' · 관할: '+data.tenant);
+      if(data.clustered_into) cat+=' · 유사 신고와 묶음 처리됨';
+      document.getElementById('rCat').textContent=cat;
+      document.getElementById('rCandidates').classList.add('hidden');
+      setSteps(1);
+    }
+    function checkStatus(){ var t=document.getElementById('trackInput').value.trim(); if(!t) return; var d=CivicAPI.getStatus(t); var out=document.getElementById('statusOut'); if(!d){ out.textContent='해당 접수번호를 찾을 수 없습니다.'; return; } out.innerHTML='상태: <b>'+d.status+'</b> · 유형: '+(d.subcategory||'미정')+' · 담당: '+(d.department||'-')+' · 접수: '+new Date(d.submitted_at).toLocaleString('ko-KR'); }
+    function addBubble(text,who,sources){ var c=document.getElementById('chat'); var b=document.createElement('div'); b.className='bubble '+who; b.textContent=text; c.appendChild(b); if(sources&&sources.length){ var s=document.createElement('div'); s.className='sources'; s.textContent='근거: '+sources.join(', '); c.appendChild(s);} c.scrollTop=c.scrollHeight; }
+    function sendChat(){ var inp=document.getElementById('chatInput'); var msg=inp.value.trim(); if(!msg) return; addBubble(msg,'me'); inp.value=''; var tn=(msg.match(/CSR-\d{4}-\d{5}/)||[])[0]; var d=CivicAPI.assistant(msg,tn); addBubble(d.reply,'bot',d.sources); }
+    window.onPhoto=onPhoto; window.useGeo=useGeo; window.searchAddr=searchAddr; window.submitReport=submitReport; window.checkStatus=checkStatus; window.sendChat=sendChat;
+    addBubble('안녕하세요! 사진을 첨부하면 AI가 위험 유형을 분석합니다.', 'bot');
+  </script>
+</body>
+</html>

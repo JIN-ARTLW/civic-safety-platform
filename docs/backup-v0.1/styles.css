@@ -1,0 +1,82 @@
+/* 공통 디자인 토큰 (packages/design-tokens 단일 소스 개념)
+   - 시민(citizen): Intercom 테마 — 친근한 블루
+   - 관제(officer): IBM Carbon 테마 — 구조적 블루 */
+:root {
+  --radius: 12px;
+  --space: 16px;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: var(--font); background: var(--bg); color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Citizen theme (Intercom-like) ---- */
+body.citizen {
+  --bg: #f3f7ff; --fg: #1a2b4a; --primary: #1f6fff; --primary-fg: #fff;
+  --card: #ffffff; --muted: #6b7a99; --accent: #e8f0ff; --ok: #1aa260; --warn: #e8a400;
+}
+/* ---- Officer theme (IBM Carbon-like) ---- */
+body.officer {
+  --bg: #f4f4f4; --fg: #161616; --primary: #0f62fe; --primary-fg: #fff;
+  --card: #ffffff; --muted: #525252; --accent: #edf5ff; --ok: #24a148; --warn: #f1c21b;
+  --border: #e0e0e0;
+}
+
+.wrap { max-width: 880px; margin: 0 auto; padding: var(--space); }
+.topbar {
+  background: var(--primary); color: var(--primary-fg); padding: 14px 20px;
+  display: flex; align-items: center; gap: 12px;
+}
+.topbar h1 { font-size: 18px; margin: 0; font-weight: 700; }
+.topbar .tag { font-size: 12px; opacity: .85; }
+.topbar a { color: var(--primary-fg); text-decoration: none; margin-left: auto; font-size: 13px; opacity: .9; }
+
+.card {
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 20px; margin: 16px 0;
+}
+body.officer .card { border: 1px solid var(--border); box-shadow: none; border-radius: 0; }
+
+label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
+input, select, textarea {
+  width: 100%; padding: 11px 12px; border: 1px solid #cfd8e8; border-radius: 8px;
+  font-size: 15px; font-family: var(--font); background: #fff; color: var(--fg);
+}
+body.officer input, body.officer select { border-radius: 0; border-color: #8d8d8d; }
+
+button {
+  background: var(--primary); color: var(--primary-fg); border: 0; cursor: pointer;
+  padding: 12px 18px; border-radius: 24px; font-size: 15px; font-weight: 600;
+}
+body.officer button { border-radius: 0; }
+button.ghost { background: var(--accent); color: var(--primary); }
+button:disabled { opacity: .5; cursor: default; }
+
+.badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.badge.received { background: #e8f0ff; color: #1f6fff; }
+.badge.in_progress { background: #fff3d6; color: #a86b00; }
+.badge.done { background: #e3f6ec; color: #1aa260; }
+.badge.rejected, .badge.invalid { background: #fde8e8; color: #d23; }
+
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 140px; }
+.steps { display: flex; gap: 8px; margin-bottom: 12px; }
+.step { flex: 1; height: 6px; border-radius: 3px; background: #d9e2f3; }
+.step.active { background: var(--primary); }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e0e0e0; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+tr:hover td { background: var(--accent); }
+
+.chat { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.bubble { padding: 10px 14px; border-radius: 16px; max-width: 80%; font-size: 14px; }
+.bubble.me { background: var(--primary); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+.bubble.bot { background: var(--accent); color: var(--fg); align-self: flex-start; border-bottom-left-radius: 4px; }
+.sources { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.muted { color: var(--muted); font-size: 13px; }
+.hidden { display: none; }
+.kpi { font-size: 28px; font-weight: 700; color: var(--primary); }
